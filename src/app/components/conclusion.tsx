@@ -1,4 +1,6 @@
-import React, { useEffect, useState } from "react";
+"use client";
+
+import { useEffect, useState } from "react";
 import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -9,12 +11,12 @@ import {
   Title,
   Tooltip,
   Legend,
+  Filler,
 } from "chart.js";
-import { validateToken } from "../service/util";
 import Link from "next/link";
+import { validateToken } from "../service/util";
 import { getMaxSpeed, postTypingData } from "../service/api";
 
-// Register the required components
 ChartJS.register(
   CategoryScale,
   LinearScale,
@@ -22,138 +24,146 @@ ChartJS.register(
   LineElement,
   Title,
   Tooltip,
-  Legend
+  Legend,
+  Filler
 );
 
-interface LineChartComponentProps {
-  label: string[];
-  cdata: number[];
+interface ConclusionProps {
+  wpm: number;
+  accuracy: number;
+  correctChars: number;
+  incorrectChars: number;
+  duration: number;
+  wpmHistory: { t: number; wpm: number }[];
+  onRestart: () => void;
 }
 
-const LineChartComponent: React.FC<LineChartComponentProps> = ({
-  label,
-  cdata,
-}: any) => {
-  const data = {
-    labels: label,
+export default function Conclusion({
+  wpm,
+  accuracy,
+  correctChars,
+  incorrectChars,
+  duration,
+  wpmHistory,
+  onRestart,
+}: ConclusionProps) {
+  const [maxWpm, setMaxWpm] = useState<number | null>(null);
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+
+  useEffect(() => {
+    const isLoggedIn = validateToken();
+    setLoggedIn(isLoggedIn);
+    if (!isLoggedIn) return;
+
+    (async () => {
+      try {
+        await postTypingData({ wpm, accuracy });
+        const res = await getMaxSpeed();
+        setMaxWpm(res?.maxWpm ?? wpm);
+      } catch (err) {
+        setSaveError(true);
+      }
+    })();
+    // Only run once, right after the test finishes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const chartData = {
+    labels: wpmHistory.map((p) => `${p.t}s`),
     datasets: [
       {
-        label: "Dataset 1",
-        data: cdata,
-        fill: false,
-        backgroundColor: "rgba(75,192,192,0.4)",
-        borderColor: "rgba(75,192,192,1)",
+        label: "WPM",
+        data: wpmHistory.map((p) => p.wpm),
+        fill: true,
+        backgroundColor: "rgba(59,130,246,0.15)",
+        borderColor: "#3b82f6",
+        tension: 0.3,
+        pointRadius: 0,
       },
-      //   {
-      //     label: "Dataset 2",
-      //     data: [28, 48, 40, 19, 86, 27, 90],
-      //     fill: false,
-      //     backgroundColor: "rgba(153,102,255,0.4)",
-      //     borderColor: "rgba(153,102,255,1)",
-      //   },
     ],
   };
 
-  const options = {
+  const chartOptions = {
     responsive: true,
+    maintainAspectRatio: false,
     plugins: {
-      legend: {
-        display: true,
-        position: "top",
+      legend: { display: false },
+      title: { display: false },
+    },
+    scales: {
+      x: {
+        ticks: { color: "#6b7280" },
+        grid: { color: "rgba(255,255,255,0.05)" },
       },
-      title: {
-        display: true,
-        text: "Line Chart Example",
+      y: {
+        ticks: { color: "#6b7280" },
+        grid: { color: "rgba(255,255,255,0.05)" },
+        beginAtZero: true,
       },
     },
   };
 
-  return <Line data={data} height={350} width={800} />;
-};
-
-export default function Conclusion({
-  wpm,
-  secArr,
-  wpmArr,
-  words,
-  wrongTyped,
-}: any) {
-  console.log("wpmArr", wpmArr);
-  console.log("secArr", secArr);
-  const [maxWpm, setMaxWpm] = useState<null | String>(null);
-  const [accuracy, setAccuracy] = useState(0);
-
-  const postData = async (typingData: any) => {
-    const res = await postTypingData(typingData);
-    return res;
-  };
-
-  useEffect(() => {
-    const resolveValueAndFetchData = async () => {
-      console.log("words", words);
-      console.log("wrongTyped", wrongTyped);
-      let accuracy = ((words - wrongTyped) / words) * 100;
-      let new_accuracy = Math.round((accuracy + Number.EPSILON) * 100) / 100;
-      console.log(new_accuracy);
-      setAccuracy(new_accuracy);
-
-      const res = validateToken();
-      console.log("validte token", res);
-      if (res) {
-        // getUserMaxWpm and set it to maxWpm
-        setMaxWpm(wpm);
-
-        const typingData = {
-          wpm: wpm,
-          accuracy: new_accuracy,
-        };
-
-        console.log("typingData,,,,,,,", typingData);
-        const res = await postTypingData(typingData);
-        console.log("====>", res);
-
-        const mx = (await getMaxSpeed()) || { maxWpm: 40 };
-        setMaxWpm(mx.maxWpm);
-      }
-    };
-
-    resolveValueAndFetchData();
-  }, []);
-
   return (
-    <div className="h-screen overflow-hidden text-gray-500 p-10 flex flex-col items-center">
-    <div className="flex flex-col md:flex-row gap-10 items-center">
-      <div className="flex flex-col gap-5">
-        <div>
-          <p className="text-2xl">WPM</p>
-          <p className="text-6xl font-semibold">{wpm}</p>
-        </div>
-        <div>
-          <p className="text-2xl">Accuracy</p>
-          <p className="text-6xl font-semibold">{accuracy}%</p>
-        </div>
-        <div>
-          <p className="text-2xl">Time</p>
-          <p className="text-6xl font-semibold">15s</p>
-        </div>
+    <div className="flex w-full max-w-2xl flex-col items-center gap-8 px-4 py-10 text-gray-300">
+      <div className="grid w-full grid-cols-2 gap-6 text-center md:grid-cols-4">
+        <Stat label="wpm" value={wpm} highlight />
+        <Stat label="accuracy" value={`${accuracy}%`} />
+        <Stat label="time" value={`${duration}s`} />
+        <Stat label="chars" value={`${correctChars}/${incorrectChars}`} />
       </div>
-      <div className="w-full md:w-auto">
-        <LineChartComponent label={secArr} cdata={wpmArr} />
-      </div>
-    </div>
-    <div className="text-white flex justify-center mt-10">
-      {!maxWpm ? (
-        <p>
-          <Link className="text-blue-600" href="/login">
-            Log in
-          </Link>{" "}
-          to save your responses
-        </p>
-      ) : (
-        <p>Max Speed: {maxWpm}</p>
-      )}
-    </div>
-  </div>
 
+      {wpmHistory.length > 1 && (
+        <div className="h-56 w-full rounded-xl border border-gray-800 bg-gray-900/40 p-4">
+          <Line data={chartData} options={chartOptions} />
+        </div>
+      )}
+
+      <button
+        onClick={onRestart}
+        className="rounded-lg bg-blue-500 px-6 py-2 font-medium text-white transition-colors hover:bg-blue-400"
+      >
+        Try again
+      </button>
+
+      <div className="text-sm text-gray-500">
+        {!loggedIn ? (
+          <p>
+            <Link className="text-blue-400 hover:underline" href="/login">
+              Log in
+            </Link>{" "}
+            to save your progress and track your best score.
+          </p>
+        ) : saveError ? (
+          <p>Couldn&apos;t save this result right now — check your connection.</p>
+        ) : (
+          <p>Best WPM: {maxWpm ?? wpm}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  highlight,
+}: {
+  label: string;
+  value: string | number;
+  highlight?: boolean;
+}) {
+  return (
+    <div>
+      <p className="mb-1 text-xs tracking-widest text-gray-500 uppercase">
+        {label}
+      </p>
+      <p
+        className={`text-4xl font-semibold ${highlight ? "text-blue-400" : "text-gray-200"
+          }`}
+      >
+        {value}
+      </p>
+    </div>
   );
 }

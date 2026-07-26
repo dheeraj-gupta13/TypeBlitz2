@@ -1,186 +1,255 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
-import { SAMPLE_PARAGRAPHS } from "../../app/para/data";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { SAMPLE_PARAGRAPHS } from "../para/data";
 import { FiRefreshCcw } from "react-icons/fi";
-import { CiDesktopMouse1, CiCircleRemove } from "react-icons/ci";
-import { BiSolidKeyboard } from "react-icons/bi";
+import { CiCircleRemove } from "react-icons/ci";
 import Conclusion from "./conclusion";
 
-// const TotalTime = 30;
+const FONT_OPTIONS = [
+  { label: "Mono", value: "font-mono" },
+  { label: "Serif", value: "font-serif" },
+  { label: "Sans", value: "font-sans" },
+];
 
-let wpmArr: any = [];
-let secArr: any = [];
+function pickParagraph(exclude?: string) {
+  if (SAMPLE_PARAGRAPHS.length <= 1) return SAMPLE_PARAGRAPHS[0];
+  let next = exclude;
+  while (!next || next === exclude) {
+    next =
+      SAMPLE_PARAGRAPHS[Math.floor(Math.random() * SAMPLE_PARAGRAPHS.length)];
+  }
+  return next;
+}
 
-export default function TypingArea({
-  timerStarted,
-  setTimerStarted,
-  timeRemaining,
-  setTimeRemaining,
-  TotalTime,
-}: any) {
-  const router = useRouter();
+interface TypingAreaProps {
+  duration: number;
+}
 
-  const [userInput, setUserInput] = useState("");
-  const [text, setText] = useState("Loading...");
-
-  const [index, setIndex] = useState(0);
-  const [wpm, setWpm] = useState(0);
-  const [words, setWords] = useState(0);
+export default function TypingArea({ duration }: TypingAreaProps) {
+  const [text, setText] = useState("");
+  const [typed, setTyped] = useState("");
+  const [timeRemaining, setTimeRemaining] = useState(duration);
+  const [timerStarted, setTimerStarted] = useState(false);
+  const [finished, setFinished] = useState(false);
   const [fontFamily, setFontFamily] = useState("font-mono");
-  const [fontFamilyOpen, setFontFamilyOpen] = useState(false);
-  const [wrongTyped, setWrongTyped] = useState(0);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [fontMenuOpen, setFontMenuOpen] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
 
+  const inputRef = useRef<HTMLInputElement>(null);
+  const typedRef = useRef("");
+  const wpmHistory = useRef<{ t: number; wpm: number }[]>([]);
+
+  // Load a fresh paragraph + saved font preference on mount
   useEffect(() => {
-    // Autofocus the textarea when the component mounts
-    if (textareaRef.current) {
-      textareaRef.current.focus();
-    }
+    setText(pickParagraph());
+    const savedFont = localStorage.getItem("font-family");
+    if (savedFont) setFontFamily(savedFont);
+    inputRef.current?.focus();
   }, []);
 
-  const fetchNewPara = () => {
-    let idx = Math.floor(Math.random() * 10);
-    setText(SAMPLE_PARAGRAPHS[idx]);
-  };
-
   useEffect(() => {
-    const fontFamily = localStorage.getItem("font-family") || "font-mono";
-    setFontFamily(fontFamily);
-    fetchNewPara();
-  }, []);
+    typedRef.current = typed;
+  }, [typed]);
 
-  const handleClick = (e: any) => {
-    if (!timerStarted) {
-      setTimerStarted(true);
-    }
+  const resetTest = useCallback(() => {
+    setText((current) => pickParagraph(current));
+    setTyped("");
+    setTimeRemaining(duration);
+    setTimerStarted(false);
+    setFinished(false);
+    wpmHistory.current = [];
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [duration]);
 
-    if (e.key === text[index]) {
-      setUserInput(userInput + e.key);
-      setIndex(index + 1);
-      setWords(words + 1);
-    } else {
-      if (e.key !== "CapsLock" && e.key !== "Shift") {
-        setWrongTyped(wrongTyped + 1);
-      }
-    }
-  };
-
-  // renders -> either change in timeRemaining, or timeStarted
+  // Countdown timer — independent of `typed` so it never drifts or resets mid-second
   useEffect(() => {
-    if (!timerStarted) return;
+    if (!timerStarted || finished) return;
 
-    let IntervalId: any = null;
+    const id = setInterval(() => {
+      setTimeRemaining((prev) => {
+        const next = prev - 1;
+        const elapsed = duration - next;
+        const correct = typedRef.current
+          .split("")
+          .filter((c, i) => c === text[i]).length;
+        const wpm = elapsed > 0 ? Math.round(correct / 5 / (elapsed / 60)) : 0;
+        wpmHistory.current.push({ t: elapsed, wpm });
+        return next;
+      });
+    }, 1000);
 
-    if (timeRemaining > 0) {
-      IntervalId = setInterval(() => {
-        const timeSpend = TotalTime - timeRemaining;
-        const wpm = timeSpend > 0 ? (words / 5 / timeSpend) * 60.0 : 0;
-        setTimeRemaining((timeRemaining: any) => timeRemaining - 1);
-        setWpm(Math.round(wpm));
+    return () => clearInterval(id);
+  }, [timerStarted, finished, duration, text]);
 
-        wpmArr.push(wpm);
-        secArr.push(timeSpend);
-      }, 1000);
-    } else {
-      clearInterval(IntervalId);
-      let accuracy = ((words - wrongTyped) / words) * 100;
-      let new_accuracy = Math.round((accuracy + Number.EPSILON) * 100) / 100;
-      console.log(new_accuracy);
+  // End the test once time runs out
+  useEffect(() => {
+    if (timerStarted && timeRemaining <= 0) {
+      setFinished(true);
+      setTimerStarted(false);
     }
+  }, [timeRemaining, timerStarted]);
 
-    return () => clearInterval(IntervalId);
-  }, [timeRemaining, timerStarted, router]);
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (finished || !text) return;
+    let value = e.target.value;
+    if (value.length > text.length) value = value.slice(0, text.length);
 
-  const setFont = (currFont: string) => {
-    setFontFamily(currFont);
-    localStorage.setItem("font-family", currFont);
+    if (!timerStarted && value.length > 0) setTimerStarted(true);
+    setTyped(value);
+
+    if (value.length === text.length) {
+      setFinished(true);
+      setTimerStarted(false);
+    }
   };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      resetTest();
+    }
+  };
+
+  const setFont = (value: string) => {
+    setFontFamily(value);
+    localStorage.setItem("font-family", value);
+    setFontMenuOpen(false);
+  };
+
+  const elapsedSeconds = duration - timeRemaining;
+  const correctChars = typed.split("").filter((c, i) => c === text[i]).length;
+  const incorrectChars = typed.length - correctChars;
+  const liveWpm =
+    elapsedSeconds > 0 ? Math.round(correctChars / 5 / (elapsedSeconds / 60)) : 0;
+  const liveAccuracy =
+    typed.length > 0
+      ? Math.round((correctChars / typed.length) * 1000) / 10
+      : 100;
+
+  if (finished) {
+    return (
+      <Conclusion
+        wpm={liveWpm}
+        accuracy={liveAccuracy}
+        correctChars={correctChars}
+        incorrectChars={incorrectChars}
+        duration={duration}
+        wpmHistory={wpmHistory.current}
+        onRestart={resetTest}
+      />
+    );
+  }
 
   return (
-    <div>
-      {timeRemaining == 0 ? (
-        <Conclusion
-          wpm={wpm}
-          words={words}
-          wrongTyped={wrongTyped}
-          wpmArr={wpmArr}
-          secArr={secArr}
+    <div className="w-full max-w-3xl">
+      {/* Stat bar */}
+      <div className="flex justify-between items-center text-xl mb-6 px-1">
+        <span className="text-blue-400 font-semibold tabular-nums">
+          {timeRemaining}s
+        </span>
+        <span className="text-gray-400 tabular-nums">
+          {timerStarted ? `${liveWpm} wpm` : "ready"}
+        </span>
+      </div>
+
+      {/* Typing area */}
+      <div
+        className="relative cursor-text rounded-xl border border-gray-800 bg-gray-900/40 p-6 md:p-8"
+        onClick={() => inputRef.current?.focus()}
+      >
+        <input
+          ref={inputRef}
+          value={typed}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          disabled={!text}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          className="absolute inset-0 z-10 cursor-text opacity-0"
+          aria-label="Typing input"
         />
-      ) : (
-        <div>
-          <div className="flex justify-between text-2xl mr-20 ml-10 mt-10 ">
-            <p className=" text-white">{timerStarted && timeRemaining} </p>
-            <p className="text-white">wpm : {wpm}</p>
-          </div>
 
-          {/* Typing Area */}
-          <div className="tracking-wide text-2xl leading-normal ">
-            <div
-              className={`${fontFamily} text-gray-500 bg-gray-950 m-2 w-11/12 ml-10`}
-            >
-              {text}
-            </div>
-
-            <textarea
-              ref={textareaRef} // Attach the ref to the textarea
-              value={userInput}
-              onKeyDown={(e) => handleClick(e)}
-              className={`${fontFamily} non-blinking-cursor tracking-wide bg-gray-900 absolute top-40 bg-sky-500/[0.01] border-none text-white  w-11/12 h-80 ml-10 resize-none`}
-              name=""
-              id="my_textarea"
-            />
-            <div
-              onClick={fetchNewPara}
-              className="text-white flex justify-center absolute bottom-10 left-1/2 cursor-pointer"
-            >
-              <div>
-                <FiRefreshCcw />{" "}
-              </div>
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className="ml-20 absolute bottom-2 text-white">
-            {fontFamilyOpen && (
-              <div className=" border-2 p-2 rounded-md cursor-pointer">
-                <div onClick={() => setFont("font-mono")} className="font-mono">
-                  font-mono
-                </div>
-                <div
-                  onClick={() => setFont("font-serif")}
-                  className="font-serif"
+        <div
+          className={`${fontFamily} pointer-events-none text-xl leading-relaxed tracking-wide transition select-none md:text-2xl ${isFocused ? "" : "blur-[3px]"
+            }`}
+        >
+          {text ? (
+            text.split("").map((char, i) => {
+              let charClass = "text-gray-500";
+              if (i < typed.length) {
+                charClass =
+                  typed[i] === char
+                    ? "text-gray-200"
+                    : "text-red-400 underline decoration-red-500/60";
+              }
+              const isCursor = i === typed.length;
+              return (
+                <span
+                  key={i}
+                  className={`${charClass} ${isCursor ? "animate-pulse border-l-2 border-blue-400" : ""
+                    }`}
                 >
-                  font-serif
-                </div>
-                <div onClick={() => setFont("font-sans")} className="font-sans">
-                  font-sans
-                </div>
-                <div onClick={() => setFont("inherit")} className="inherit">
-                  inherit
-                </div>
-              </div>
-            )}
-
-            <div className="flex items-center">
-              <div className={`${fontFamily} text-white mr-1`}>
-                {fontFamily}
-              </div>
-              <div
-                className="text-white"
-                onClick={() => setFontFamilyOpen(!fontFamilyOpen)}
-              >
-                {!fontFamilyOpen ? (
-                  <CiDesktopMouse1 className="text-white" />
-                ) : (
-                  <CiCircleRemove className="text-white" />
-                )}
-              </div>
-            </div>
-          </div>
+                  {char}
+                </span>
+              );
+            })
+          ) : (
+            <span className="text-gray-600">Loading…</span>
+          )}
         </div>
-      )}
+
+        {!isFocused && (
+          <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-gray-950/50 text-sm text-gray-300">
+            Click here or press any key to focus
+          </div>
+        )}
+      </div>
+
+      {/* Footer controls */}
+      <div className="mt-6 flex items-center justify-between px-1">
+        <div className="relative">
+          <button
+            onClick={() => setFontMenuOpen((o) => !o)}
+            className="flex items-center gap-2 text-sm text-gray-400 transition-colors hover:text-white"
+          >
+            {fontMenuOpen ? (
+              <CiCircleRemove className="text-lg" />
+            ) : (
+              <span className={fontFamily}>Aa</span>
+            )}
+            <span>Font</span>
+          </button>
+
+          {fontMenuOpen && (
+            <div className="absolute bottom-full left-0 mb-2 overflow-hidden rounded-lg border border-gray-800 bg-gray-900 shadow-xl">
+              {FONT_OPTIONS.map((opt) => (
+                <div
+                  key={opt.value}
+                  onClick={() => setFont(opt.value)}
+                  className={`${opt.value} cursor-pointer px-4 py-2 text-sm hover:bg-gray-800 ${fontFamily === opt.value ? "text-blue-400" : "text-gray-300"
+                    }`}
+                >
+                  {opt.label}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={resetTest}
+          className="flex items-center gap-2 text-sm text-gray-400 transition-colors hover:text-white"
+          title="Restart (Tab)"
+        >
+          <FiRefreshCcw />
+          Restart
+        </button>
+      </div>
     </div>
   );
 }
